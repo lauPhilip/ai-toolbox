@@ -1,0 +1,13 @@
+[project]
+name = "ai-toolbox"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb>=1.4.1",
+    "ollama>=0.6.1",
+    "pypdf>=6.6.2",
+    "streamlit>=1.53.1",
+    "streamlit-authenticator>=0.3.0"
+]
