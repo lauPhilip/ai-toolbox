@@ -64,7 +64,86 @@ with st.sidebar:
         authenticator.logout('Log out', 'sidebar')
 
 # --- MAIN PAGE: OPEN STUDENT PORTAL ---
-st.title("🎓 Student Learning Portal")
-st.write("Welcome to the open course assistant.")
+import streamlit as st
+import weaviate
+import time
+import weaviate.classes as wvc
+from weaviate.classes.init import Auth
+from weaviate.classes.query import Filter
 
-# (Your ChromaDB Client and Chat Logic go here)
+# --- WEAVIATE CONNECTION ---
+# Using the same secrets you set up earlier
+wcd_url = st.secrets["WEAVIATE_URL"]
+wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
+
+@st.cache_resource # Keeps the connection alive without reconnecting every click
+def get_weaviate_client():
+    return weaviate.connect_to_weaviate_cloud(
+        cluster_url=wcd_url,
+        auth_credentials=Auth.api_key(wcd_api_key),
+        headers={
+        "X-Mistral-Api-Key": st.secrets["MISTRAL_KEY"] 
+    }
+    )
+
+client = get_weaviate_client()
+collection = client.collections.get("CourseBotMemory")
+
+# --- STUDENT INTERFACE ---
+st.title("🎓 Student Learning Portal")
+st.write("Select your course to begin chatting with the course-specific knowledge base.")
+
+# 1. Fetch all available courses across the institution
+# We fetch them uniquely so students can pick from a list
+all_objects = collection.query.fetch_objects(return_properties=["course_name"], limit=1000)
+available_courses = sorted(list(set([obj.properties['course_name'] for obj in all_objects.objects])))
+
+if available_courses:
+    selected_course = st.selectbox("Choose a Course Bot:", available_courses)
+    
+    st.divider()
+    
+    # 2. Simple Chat Interface
+    user_query = st.chat_input(f"Ask a question about {selected_course}...")
+    
+if user_query:
+    with st.chat_message("user"):
+        st.markdown(user_query)
+
+    with st.chat_message("assistant"):
+        # 1. Fetch data with Generative RAG
+        # We use a 'single_prompt' to have the LLM answer based on the chunks
+        response = collection.generate.hybrid(
+            query=user_query,
+            target_vector="default", # Ensure this matches your named vector if used
+            filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
+            single_prompt=f"Answer the user query: '{user_query}' using only the provided context. "
+                          "Use [citation n] format for every fact you mention.",
+            limit=3
+        )
+
+        if response.objects:
+            # 2. Extract the answer and sources
+            full_answer = response.generated
+            references = []
+            
+            for i, obj in enumerate(response.objects, 1):
+                ref_name = obj.properties.get("doc_title", "Unknown Source")
+                references.append(f"[citation {i}] - {ref_name}")
+
+            # 3. The "F.R.I.D.A.Y." Streaming Effect
+            placeholder = st.empty()
+            streamed_text = ""
+            
+            # Simple word-by-word streaming for the typewriter feel
+            for word in full_answer.split(" "):
+                streamed_text += word + " "
+                placeholder.markdown(streamed_text + "▌")
+                time.sleep(0.05)
+            
+            # 4. Final render with the citation list
+            ref_footer = "\n\n**References used:**\n" + "\n".join(references)
+            placeholder.markdown(streamed_text + ref_footer)
+            
+        else:
+            st.warning(f"Im not picking up anything relevant in those course files, {st.session_state['name']}.")

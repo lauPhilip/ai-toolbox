@@ -1,6 +1,8 @@
 import streamlit as st
 import weaviate
+from weaviate.classes.init import Auth
 import weaviate.classes as wvc
+from weaviate.classes.query import Filter
 from pypdf import PdfReader
 from pptx import Presentation
 import uuid
@@ -21,8 +23,17 @@ if str(st.session_state.get("role")).lower() != "teacher":
         st.switch_page("main.py")
     st.stop()
 # --- WEAVIATE CORE ---
-client = weaviate.connect_to_local() # Assuming local Docker instance
-collection = client.collections.get("CourseMaterial")
+# Pulling credentials from .streamlit/secrets.toml
+wcd_url = st.secrets["WEAVIATE_URL"]
+wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
+
+client = weaviate.connect_to_weaviate_cloud(
+    cluster_url=wcd_url,
+    auth_credentials=Auth.api_key(wcd_api_key),
+)
+
+# Targeting the collection from your console screenshot
+collection = client.collections.get("CourseBotMemory")
 
 st.title(f"👨‍🏫 {st.session_state['name']}'s Command Center")
 
@@ -47,7 +58,7 @@ with tab_upload:
     
     if st.button("Vectorize & Save"):
         if course_name and uploaded_files:
-            with st.spinner("L.U.M.A. is processing..."):
+            with st.spinner("course-bot is processing..."):
                 for file in uploaded_files:
                     raw_text = extract_text(file)
                     # Simple chunking (1000 chars)
@@ -69,13 +80,16 @@ with tab_upload:
             st.warning("Course Name and Files are required.")
 
 with tab_manage:
+    # --- tab_manage section ---
     st.subheader("Your Active Courses")
+
     # Fetch unique courses managed by this specific teacher
-    results = collection.query.get(
-        filters=wvc.query.Filter.by_property("course_administrator").equal(st.session_state['username']),
-        return_properties=["course_name"]
+    results = collection.query.fetch_objects(
+        filters=Filter.by_property("course_administrator").equal(st.session_state['username']),
+        return_properties=["course_name"],
+        limit=1000 # Good practice to set a limit
     )
-    
+
     # Get unique list of courses
     my_courses = list(set([obj.properties['course_name'] for obj in results.objects]))
     
@@ -83,9 +97,10 @@ with tab_manage:
         selected_course = st.selectbox("Select Course to Manage", my_courses)
         
         # Show files in this course
-        file_results = collection.query.get(
-            filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
-            return_properties=["doc_title"]
+        file_results = collection.query.fetch_objects(
+            filters=Filter.by_property("course_name").equal(selected_course),
+            return_properties=["doc_title"],
+            limit=1000
         )
         unique_files = list(set([obj.properties['doc_title'] for obj in file_results.objects]))
         
