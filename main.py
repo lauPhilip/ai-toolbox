@@ -1,7 +1,6 @@
 import streamlit as st
 import streamlit_authenticator as stauth
 import yaml
-import chromadb
 from yaml.loader import SafeLoader
 
 st.set_page_config(page_title="au-btech-course-bot", layout="wide")
@@ -70,6 +69,7 @@ import time
 import weaviate.classes as wvc
 from weaviate.classes.init import Auth
 from weaviate.classes.query import Filter
+from weaviate.classes.init import Auth, AdditionalConfig, Timeout
 
 # --- WEAVIATE CONNECTION ---
 # Using the same secrets you set up earlier
@@ -83,7 +83,7 @@ def get_weaviate_client():
         auth_credentials=Auth.api_key(wcd_api_key),
         headers={
         "X-Mistral-Api-Key": st.secrets["MISTRAL_KEY"] 
-    }
+    },
     )
 
 client = get_weaviate_client()
@@ -112,38 +112,42 @@ if user_query:
 
     with st.chat_message("assistant"):
         # 1. Fetch data with Generative RAG
-        # We use a 'single_prompt' to have the LLM answer based on the chunks
         response = collection.generate.hybrid(
             query=user_query,
-            target_vector="default", # Ensure this matches your named vector if used
+            target_vector="default", 
             filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
-            single_prompt=f"Answer the user query: '{user_query}' using only the provided context. "
-                          "Use [citation n] format for every fact you mention.",
+            single_prompt=(
+                f"Answer the following query: '{user_query}' using only the provided context. "
+                "Maintain a professional, technical tone. Use [citation n] format for every fact mentioned."
+            ),
             limit=3
         )
 
-        if response.objects:
-            # 2. Extract the answer and sources
-            full_answer = response.generated
-            references = []
-            
-            for i, obj in enumerate(response.objects, 1):
-                ref_name = obj.properties.get("doc_title", "Unknown Source")
-                references.append(f"[citation {i}] - {ref_name}")
+        # 2. Extract text using the new 'generative.text' property
+        # We use getattr or a direct check to prevent the NoneType error
+        full_answer = response.generative.text if response.generative else None
 
-            # 3. The "F.R.I.D.A.Y." Streaming Effect
+        if full_answer:
+            references = [
+                f"[citation {i}] - {obj.properties.get('doc_title', 'Unknown Source')}"
+                for i, obj in enumerate(response.objects, 1)
+            ]
+
+            # 3. Streaming Effect
             placeholder = st.empty()
             streamed_text = ""
             
-            # Simple word-by-word streaming for the typewriter feel
             for word in full_answer.split(" "):
                 streamed_text += word + " "
                 placeholder.markdown(streamed_text + "▌")
-                time.sleep(0.05)
+                time.sleep(0.04)
             
             # 4. Final render with the citation list
             ref_footer = "\n\n**References used:**\n" + "\n".join(references)
-            placeholder.markdown(streamed_text + ref_footer)
+            placeholder.markdown(streamed_text.strip() + ref_footer)
             
+        elif response.objects:
+            # If we have objects but no text, the LLM provider (Mistral) likely hit a snag
+            st.error("Materials found, but generation failed. Check your Mistral API key and headers.")
         else:
-            st.warning(f"Im not picking up anything relevant in those course files, {st.session_state['name']}.")
+            st.warning(f"No relevant information found for '{selected_course}'.")
