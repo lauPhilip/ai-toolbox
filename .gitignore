@@ -11,3 +11,4 @@ wheels/
 .streamlit
 .yml
 /venv
+*.venv
