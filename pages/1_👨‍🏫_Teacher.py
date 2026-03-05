@@ -35,7 +35,7 @@ client = weaviate.connect_to_weaviate_cloud(
 # Targeting the collection from your console screenshot
 collection = client.collections.get("CourseBotMemory")
 
-st.title(f"👨‍🏫 {st.session_state['name']}'s Command Center")
+st.title(f"👨‍🏫 {st.session_state['name']}'s Course Dashboard")
 
 # --- UTILITY: FILE EXTRACTION ---
 def extract_text(file):
