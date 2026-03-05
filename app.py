@@ -34,6 +34,13 @@ else:
 
 # --- 5. SIDEBAR AUTH UI ---
 with st.sidebar:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image("img/AU-LOGO.png", width='stretch')
+    with col2:
+        st.image("img/IT-VEST-LOGO.png", width='stretch')
+    
+    st.divider()
     st.title("👨‍🏫 Staff Access")
     
     # Check if we are NOT logged in
