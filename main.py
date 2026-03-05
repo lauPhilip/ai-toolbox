@@ -67,87 +67,105 @@ import streamlit as st
 import weaviate
 import time
 import weaviate.classes as wvc
-from weaviate.classes.init import Auth
-from weaviate.classes.query import Filter
 from weaviate.classes.init import Auth, AdditionalConfig, Timeout
+from mistralai import Mistral
 
-# --- WEAVIATE CONNECTION ---
-# Using the same secrets you set up earlier
-wcd_url = st.secrets["WEAVIATE_URL"]
-wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
+# --- 1. MISTRAL & WEAVIATE CLIENT SETUP ---
+mistral_client = Mistral(api_key=st.secrets["MISTRAL_KEY"])
 
-@st.cache_resource # Keeps the connection alive without reconnecting every click
+@st.cache_resource 
 def get_weaviate_client():
     return weaviate.connect_to_weaviate_cloud(
-        cluster_url=wcd_url,
-        auth_credentials=Auth.api_key(wcd_api_key),
-        headers={
-        "X-Mistral-Api-Key": st.secrets["MISTRAL_KEY"] 
-    },
+        cluster_url=st.secrets["WEAVIATE_URL"],
+        auth_credentials=Auth.api_key(st.secrets["WEAVIATE_API_KEY"]),
+        # We keep the timeout config for the hybrid search part
+        additional_config=AdditionalConfig(
+            timeout=Timeout(query=60, insert=120, init=30) 
+        )
     )
 
 client = get_weaviate_client()
 collection = client.collections.get("CourseBotMemory")
 
-# --- STUDENT INTERFACE ---
+# --- 2. STUDENT INTERFACE ---
 st.title("🎓 Student Learning Portal")
 st.write("Select your course to begin chatting with the course-specific knowledge base.")
 
-# 1. Fetch all available courses across the institution
-# We fetch them uniquely so students can pick from a list
+# Fetch available courses
 all_objects = collection.query.fetch_objects(return_properties=["course_name"], limit=1000)
 available_courses = sorted(list(set([obj.properties['course_name'] for obj in all_objects.objects])))
 
 if available_courses:
     selected_course = st.selectbox("Choose a Course Bot:", available_courses)
-    
     st.divider()
-    
-    # 2. Simple Chat Interface
     user_query = st.chat_input(f"Ask a question about {selected_course}...")
     
-if user_query:
-    with st.chat_message("user"):
-        st.markdown(user_query)
+    if user_query:
+        # User message
+        with st.chat_message("user"):
+            st.markdown(user_query)
 
-    with st.chat_message("assistant"):
-        # 1. Fetch data with Generative RAG
-        response = collection.generate.hybrid(
-            query=user_query,
-            target_vector="default", 
-            filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
-            single_prompt=(
-                f"Answer the following query: '{user_query}' using only the provided context. "
-                "Maintain a professional, technical tone. Use [citation n] format for every fact mentioned."
-            ),
-            limit=3
-        )
+        # Assistant message
+        with st.chat_message("assistant"):
+            # STEP A: Retrieve chunks from Weaviate (Standard Search)
+            with st.spinner("Searching course materials..."):
+                search_results = collection.query.hybrid(
+                    query=user_query,
+                    filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
+                    limit=3
+                )
 
-        # 2. Extract text using the new 'generative.text' property
-        # We use getattr or a direct check to prevent the NoneType error
-        full_answer = response.generative.text if response.generative else None
+            if search_results.objects:
+                # STEP B: Format Context for Mistral
+                context_text = ""
+                references = []
+                for i, obj in enumerate(search_results.objects, 1):
+                    # We pull the actual chunk text and the doc title
+                    chunk_content = obj.properties.get('chunk', 'No content found.')
+                    doc_title = obj.properties.get('doc_title', 'Unknown Source')
+                    
+                    context_text += f"---\nSource {i}:\n{chunk_content}\n"
+                    references.append(f"[citation {i}] - {doc_title}")
 
-        if full_answer:
-            references = [
-                f"[citation {i}] - {obj.properties.get('doc_title', 'Unknown Source')}"
-                for i, obj in enumerate(response.objects, 1)
-            ]
+                # STEP C: Generate response using Mistral SDK
+                with st.spinner("Mistral is analyzing and writing..."):
+                    try:
+                        chat_response = mistral_client.chat.complete(
+                            model="mistral-medium-latest",
+                            messages=[
+                                {
+                                    "role": "system", 
+                                    "content": ("You are a professional academic assistant. "
+                                               "Answer based ONLY on the provided context. "
+                                               "If the answer isn't in the context, say you don't know. "
+                                               "Use [citation n] format for every fact mentioned.")
+                                },
+                                {
+                                    "role": "user", 
+                                    "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"
+                                },
+                            ]
+                        )
+                        full_answer = chat_response.choices[0].message.content
+                    except Exception as e:
+                        st.error(f"Mistral API Error: {e}")
+                        st.stop()
 
-            # 3. Streaming Effect
-            placeholder = st.empty()
-            streamed_text = ""
-            
-            for word in full_answer.split(" "):
-                streamed_text += word + " "
-                placeholder.markdown(streamed_text + "▌")
-                time.sleep(0.04)
-            
-            # 4. Final render with the citation list
-            ref_footer = "\n\n**References used:**\n" + "\n".join(references)
-            placeholder.markdown(streamed_text.strip() + ref_footer)
-            
-        elif response.objects:
-            # If we have objects but no text, the LLM provider (Mistral) likely hit a snag
-            st.error("Materials found, but generation failed. Check your Mistral API key and headers.")
-        else:
-            st.warning(f"No relevant information found for '{selected_course}'.")
+                # STEP D: Streaming Effect
+                placeholder = st.empty()
+                streamed_text = ""
+                
+                # Split by words for the typewriter feel
+                for word in full_answer.split(" "):
+                    streamed_text += word + " "
+                    placeholder.markdown(streamed_text + "▌")
+                    time.sleep(0.04)
+                
+                # Final render with Reference Footer
+                ref_footer = "\n\n**References used:**\n" + "\n".join(references)
+                placeholder.markdown(streamed_text.strip() + ref_footer)
+                
+            else:
+                st.warning(f"No relevant information found for '{selected_course}' in the database.")
+else:
+    st.info("No course materials have been uploaded yet.")
