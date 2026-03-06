@@ -4,7 +4,9 @@ import weaviate
 import weaviate.classes as wvc
 from weaviate.classes.init import Auth
 from datetime import datetime
-
+from wordcloud import WordCloud
+from wordcloud import STOPWORDS
+import matplotlib.pyplot as plt
 
 wcd_url = st.secrets["WEAVIATE_URL"]
 wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
@@ -72,10 +74,39 @@ try:
             
             df = pd.DataFrame(data)
 
-            # Use column_config to wrap text and set fixed widths
+            # --- WORD CLOUD SECTION ---
+            st.subheader("🔍 Common Themes")
+
+            custom_stopwords = set(STOPWORDS).union({"please", "help", "find", "information"})
+            text = " ".join(df["Student Query"].fillna("").astype(str).tolist())
+
+            if text.strip():
+                wordcloud = WordCloud(
+                    stopwords=custom_stopwords,
+                    width=800, 
+                    height=350, 
+                    background_color='white',
+                    colormap='viridis'
+                ).generate(text)
+
+                # Ensure we are calling subplots from the plt (pyplot) alias
+                fig, ax = plt.subplots(figsize=(10, 5)) 
+                ax.imshow(wordcloud, interpolation='bilinear')
+                ax.axis("off")
+                
+                # Use Streamlit's native plotter to render the figure
+                st.pyplot(fig)
+                
+                # Important: Close the plot to free up memory
+                plt.close(fig) 
+            else:
+                st.info("Not enough query data to generate a theme cloud.")
+
+            # --- RENDER TABLE BELOW CLOUD ---
+            st.subheader("📄 Interaction Logs")
             st.dataframe(
                 df,
-                width='stretch',
+                use_container_width=True, # Recommended over width='stretch'
                 hide_index=True,
                 column_config={
                     "Time": st.column_config.TextColumn("Time", width="small"),
@@ -86,17 +117,14 @@ try:
                     ),
                     "Bot Response": st.column_config.TextColumn(
                         "Bot Response", 
-                        width="large",
-                        # This doesn't wrap in the table cell itself yet in all versions, 
-                        # but setting width stops the infinite overflow.
+                        width="large"
                     )
                 }
             )
             
-            # Optional: Add a CSV download for external reporting
+            # Download button at the bottom
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Logs as CSV", data=csv, file_name=f"{selected}_analytics.csv")
-            
         else:
             st.info(f"No student interactions recorded for '{selected}' yet.")
     else:
