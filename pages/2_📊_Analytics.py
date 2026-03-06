@@ -7,6 +7,8 @@ from datetime import datetime
 from wordcloud import WordCloud
 from wordcloud import STOPWORDS
 import matplotlib.pyplot as plt
+from collections import Counter
+import re
 
 wcd_url = st.secrets["WEAVIATE_URL"]
 wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
@@ -101,6 +103,28 @@ try:
                 plt.close(fig) 
             else:
                 st.info("Not enough query data to generate a theme cloud.")
+
+            st.subheader("📊 Top 15 Search Terms")
+
+            # Clean the text: lowercase and remove non-alphabetical characters
+            words = re.findall(r'\w+', text.lower())
+
+            # Filter out common 'stop words' that aren't useful for analytics
+            # You can expand this list with course-specific words to ignore
+            stop_words = {'the', 'a', 'to', 'is', 'in', 'of', 'and', 'it', 'for', 'on', 'with', 'was', 'as', 'at', 'an'}
+            filtered_words = [w for w in words if w not in stop_words and len(w) > 2]
+
+            # Count and get the top 15
+            word_counts = Counter(filtered_words).most_common(15)
+
+            if word_counts:
+                # Convert to DataFrame for easy plotting
+                chart_data = pd.DataFrame(word_counts, columns=['Word', 'Count']).set_index('Word')
+                
+                # Render the bar chart
+                st.bar_chart(chart_data)
+            else:
+                st.write("Not enough data to generate word statistics.")
 
             # --- RENDER TABLE BELOW CLOUD ---
             st.subheader("📄 Interaction Logs")
