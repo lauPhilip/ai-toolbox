@@ -130,8 +130,42 @@ with tab_manage:
             current_lvl = obj.properties.get("program") or current_lvl
             current_t = obj.properties.get("temperature") if obj.properties.get("temperature") is not None else current_t
 
+        # --- SYSTEM PROMPT LIBRARY INTEGRATION ---
+        # Check if there is a prompt waiting to be imported from the library
+        if 'active_prompt_copy' in st.session_state:
+            st.info("💡 You have a prompt template waiting in your clipboard from the Library.")
+            
+            p_col1, p_col2 = st.columns([0.7, 0.3])
+            with p_col1:
+                # Show a snippet of what's waiting
+                st.write("**Template waiting:** " + st.session_state['active_prompt_copy'][:50] + "...")
+            with p_col2:
+                if st.button("📋 Use Template"):
+                    # This is the crucial part: update the variable directly
+                    current_p = st.session_state['active_prompt_copy']
+                    
+                    # Clear the clipboard
+                    del st.session_state['active_prompt_copy']
+                    
+                    # Use a temporary state variable to force the text_area to update
+                    st.session_state["pasted_prompt"] = current_p
+                    st.rerun()
+
+        # Determine what the text area should display
+        # We prioritize a freshly pasted prompt over the one fetched from Weaviate
+        if "pasted_prompt" in st.session_state:
+            final_prompt_value = st.session_state["pasted_prompt"]
+        else:
+            final_prompt_value = current_p
+
         # UI for editing
-        edit_p = st.text_area("System Prompt", value=current_p, help="Instructions for how the AI should behave.")
+        edit_p = st.text_area(
+            "System Prompt", 
+            value=final_prompt_value, 
+            height=250,
+            help="Instructions for how the AI should behave."
+        )
+        
         edit_t = st.slider("Temperature (Creativity)", 0.0, 1.0, float(current_t), 0.1)
         
         if st.button("💾 Save Bot Settings"):
@@ -139,20 +173,23 @@ with tab_manage:
                 # 1. Fetch all object IDs for this course
                 targets = collection.query.fetch_objects(
                     filters=Filter.by_property("course_name").equal(selected_course),
-                    return_properties=[], # We only need the UUIDs
+                    return_properties=[], 
                     limit=10000 
                 )
                 
                 # 2. Update each object individually
-                # (Weaviate v4 handles this very fast internally)
                 for obj in targets.objects:
                     collection.data.update(
                         uuid=obj.uuid,
                         properties={
-                            "system_prompt": edit_p,
+                            "system_prompt": edit_p, # This will now correctly take the text_area content
                             "temperature": edit_t
                         }
                     )
+            
+            # --- CLEANUP AFTER SUCCESSFUL SAVE ---
+            if "pasted_prompt" in st.session_state:
+                del st.session_state["pasted_prompt"]
             
             st.success(f"Bot personality updated for all {len(targets.objects)} chunks in {selected_course}!")
             st.rerun()

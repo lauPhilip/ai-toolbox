@@ -23,13 +23,22 @@ authenticator = stauth.Authenticate(
 student_portal = st.Page("student_portal.py", title="Student Portal", icon="🎓", default=True)
 teacher_dashboard = st.Page("pages/1_👨‍🏫_Teacher.py", title="Teacher Dashboard", icon="👨‍🏫")
 analytics_page = st.Page("pages/2_📊_Analytics.py", title="Analytics", icon="📊")
+prompt_library = st.Page("pages/3_📚_System_Prompt_Library.py", title="System Prompt Library", icon="📚")
 
-# --- 4. NAVIGATION LOGIC ---
 if st.session_state.get("authentication_status"):
-    # Show both when logged in
-    pg = st.navigation({"Portal": [student_portal], "Staff": [teacher_dashboard, analytics_page]})
+    # Ensure the role is specifically 'teacher' before showing the library
+    role = str(st.session_state.get("role")).lower()
+    
+    if role == "teacher":
+        pg = st.navigation({
+            "Portal": [student_portal], 
+            "Staff": [teacher_dashboard, analytics_page, prompt_library]
+        })
+    else:
+        # For students or other roles
+        pg = st.navigation({"Portal": [student_portal]})
 else:
-    # Hide Teacher Dashboard when logged out
+    # Logged out
     pg = st.navigation({"Portal": [student_portal]})
 
 # --- 5. SIDEBAR AUTH UI ---
