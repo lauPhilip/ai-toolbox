@@ -81,12 +81,20 @@ if available_courses:
                 search_results = collection.query.hybrid(
                     query=user_query,
                     filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
+                    return_properties=["chunk", "doc_title", "system_prompt", "temperature"],
                     limit=3
                 )
 
             if search_results.objects:
                 context_text = ""
                 references = []
+
+                first_obj = search_results.objects[0]
+                dynamic_sys_prompt = first_obj.properties.get('system_prompt') or "You are a professional academic assistant."
+                dynamic_temp = first_obj.properties.get('temperature')
+                # Ensure temperature is a float and within 0.0-1.0; default to 0.2 if missing
+                final_temp = float(dynamic_temp) if dynamic_temp is not None else 0.2
+
                 for i, obj in enumerate(search_results.objects, 1):
                     chunk_content = obj.properties.get('chunk', 'No content found.')
                     doc_title = obj.properties.get('doc_title', 'Unknown Source')
@@ -98,7 +106,7 @@ if available_courses:
                         chat_response = mistral_client.chat.complete(
                             model="mistral-medium-latest",
                             messages=[
-                                {"role": "system", "content": "You are a professional academic assistant..."},
+                                {"role": "system", "content": dynamic_sys_prompt},
                                 {"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"},
                             ]
                         )
