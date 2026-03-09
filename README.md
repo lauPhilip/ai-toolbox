@@ -1,5 +1,4 @@
-# AU BTECH AI Toolbox
-**course-bot**
+# AU BTECH AI Toolbox | Course-bot
 
 <p align="center">
   <img src="img/AU-LOGO.png" width="400" alt="AU BTECH Logo">
@@ -32,4 +31,5 @@ To empower students and faculty in Herning with state-of-the-art Generative AI t
 
 ---
 *Developed for Aarhus University, BTECH. Supported by IT-vest.*
+
 
