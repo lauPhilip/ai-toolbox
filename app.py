@@ -24,6 +24,8 @@ student_portal = st.Page("student_portal.py", title="Student Portal", icon="🎓
 teacher_dashboard = st.Page("pages/1_👨‍🏫_Teacher.py", title="Teacher Dashboard", icon="👨‍🏫")
 analytics_page = st.Page("pages/2_📊_Analytics.py", title="Analytics", icon="📊")
 prompt_library = st.Page("pages/3_📚_System_Prompt_Library.py", title="System Prompt Library", icon="📚")
+student_prompt_lib = st.Page("pages/4_📋_Student_Prompt_Library.py", title="Prompt Library", icon="📋")
+
 
 if st.session_state.get("authentication_status"):
     # Ensure the role is specifically 'teacher' before showing the library
@@ -32,11 +34,11 @@ if st.session_state.get("authentication_status"):
     if role == "teacher":
         pg = st.navigation({
             "Portal": [student_portal], 
-            "Staff": [teacher_dashboard, analytics_page, prompt_library]
+            "Staff": [teacher_dashboard, analytics_page, prompt_library,student_prompt_lib]
         })
     else:
         # For students or other roles
-        pg = st.navigation({"Portal": [student_portal]})
+        pg = st.navigation({"Portal": [student_portal,student_prompt_lib]})
 else:
     # Logged out
     pg = st.navigation({"Portal": [student_portal]})
