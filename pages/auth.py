@@ -1,31 +1,63 @@
 import streamlit as st
-import yaml
-from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
-import os
+from weaviate.classes.query import Filter
+import time
 
 st.title("👨‍🏫 Staff Access Control")
 st.divider()
 
-# 1. Grab objects from session state
-config = st.session_state["config"]
+# 1. Grab the global Weaviate client and Authenticator from app.py
+if "authenticator" not in st.session_state:
+    st.error("course-bot. Connection Error. Please return to the Home page.")
+    st.stop()
+
+# Using the cached client established in app.py
+client = st.session_state.get("weaviate_client") # Ensure this is set in app.py or use the getter
+if not client:
+    from app import get_weaviate_client
+    client = get_weaviate_client()
+
 authenticator = st.session_state["authenticator"]
+user_registry = client.collections.get("UserRegistry")
 
 choice = st.radio("Select Action", ["Login", "Register"], horizontal=True)
 
 if choice == "Login":
-    # Login usually behaves better
-    authenticator.login(location='main', key='page_login')
-    if st.session_state.get("authentication_status"):
-        username = st.session_state.get("username")
-        user_info = config['credentials']['usernames'].get(username, {})
-        st.session_state['role'] = user_info.get('role', 'teacher')
-        st.success(f"Welcome back, {st.session_state['name']}!")
-        st.rerun()
+    st.subheader("🔑 Staff Login")
+    
+    # We use custom login fields to verify against Weaviate directly
+    with st.container(border=True):
+        login_user = st.text_input("Username")
+        login_pass = st.text_input("Password", type="password")
+        
+        if st.button("Log In", type="primary", width='stretch'):
+            # Query Weaviate for the specific user
+            response = user_registry.query.fetch_objects(
+                filters=Filter.by_property("username").equal(login_user),
+                limit=1
+            )
+            
+            if response.objects:
+                user_obj = response.objects[0].properties
+                stored_hash = user_obj["password_hash"]
+                
+                # Verify the password using the stauth utility
+                if stauth.Hasher.check_pw(stored_hash, login_pass):
+                    st.session_state["authentication_status"] = True
+                    st.session_state["username"] = login_user
+                    st.session_state["name"] = user_obj["name"]
+                    st.session_state["role"] = user_obj["role"]
+                    
+                    st.success(f"Welcome back, {user_obj['name']}!")
+                    time.sleep(1)
+                    st.switch_page("landing.py")
+                else:
+                    st.error("Incorrect password.")
+            else:
+                st.error("User not found in the AU BTECH registry.")
 
 else:
     st.subheader("📝 Create Staff Account")
-    # We use a container instead of a form to avoid the 'Nested Form' error
     with st.container(border=True):
         reg_name = st.text_input("Full Name (e.g., Philip Lau)")
         reg_email = st.text_input("Email (@btech.au.dk)")
@@ -33,43 +65,35 @@ else:
         reg_password = st.text_input("Password", type="password")
         reg_password_repeat = st.text_input("Repeat Password", type="password")
         
-    if st.button("🚀 Register Account", type="primary"):
-        # 1. AUTHENTIC RELOAD: Get the freshest data from the disk first
-        if os.path.exists('config.yaml'):
-            with open('config.yaml', 'r') as file:
-                current_config = yaml.load(file, Loader=SafeLoader) or {}
-        else:
-            current_config = {"credentials": {"usernames": {}}, "cookie": {}}
-
-        # 2. NAVIGATE THE STRUCTURE: Ensure the keys exist before appending
-        if 'credentials' not in current_config:
-            current_config['credentials'] = {'usernames': {}}
-        if 'usernames' not in current_config['credentials']:
-            current_config['credentials']['usernames'] = {}
-
-        # 3. VALIDATE: Check if the username already exists in the FILE
-        if reg_username in current_config['credentials']['usernames']:
-            st.error(f"User '{reg_username}' already exists in the AU BTECH database.")
-        elif not reg_email.endswith("@btech.au.dk"):
-            st.error("Access Denied: Use an official @btech.au.dk email.")
-        else:
-            # 4. HASH & APPEND: Use the new v0.3.0 hashing utility
-            hashed_pw = stauth.Hasher.hash(reg_password)
-            
-            # Add the new user to the existing dictionary
-            current_config['credentials']['usernames'][reg_username] = {
-                "email": reg_email,
-                "name": reg_name,
-                "password": hashed_pw,
-                "role": "teacher"
-            }
-
-            # 5. ATOMIC SAVE: Overwrite the file with the COMPLETE updated list
-            with open('config.yaml', 'w') as file:
-                yaml.dump(current_config, file, default_flow_style=False)
+        if st.button("🚀 Register Account", type="primary", width='stretch'):
+            # 1. Validation Logic
+            if not reg_email.endswith("@btech.au.dk"):
+                st.error("Access Denied: Please use your official @btech.au.dk email.")
+            elif reg_password != reg_password_repeat:
+                st.error("Passwords do not match.")
+            elif not (reg_username and reg_password and reg_name):
+                st.error("All fields are required.")
+            else:
+                # 2. Check if username exists in Weaviate
+                existing = user_registry.query.fetch_objects(
+                    filters=Filter.by_property("username").equal(reg_username),
+                    limit=1
+                )
                 
-            # Update session state so the Login tab sees the new user immediately
-            st.session_state["config"] = current_config
-            
-            st.success(f"Successfully registered {reg_name}. You can now log in.")
-            st.balloons()
+                if existing.objects:
+                    st.error(f"Username '{reg_username}' is already taken.")
+                else:
+                    # 3. Hash & Insert to Cloud
+                    with st.spinner("Encrypting credentials..."):
+                        hashed_pw = stauth.Hasher.hash(reg_password)
+                        
+                        user_registry.data.insert({
+                            "name": reg_name,
+                            "email": reg_email,
+                            "username": reg_username,
+                            "password_hash": hashed_pw,
+                            "role": "teacher"
+                        })
+                    
+                    st.success(f"Successfully registered {reg_name}. You can now switch to Login.")
+                    st.balloons()
