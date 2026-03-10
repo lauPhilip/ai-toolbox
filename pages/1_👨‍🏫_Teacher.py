@@ -27,11 +27,14 @@ if str(st.session_state.get("role")).lower() != "teacher":
 wcd_url = st.secrets["WEAVIATE_URL"]
 wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
 
-client = weaviate.connect_to_weaviate_cloud(
+@st.cache_resource
+def get_weaviate_client():
+    return weaviate.connect_to_weaviate_cloud(
     cluster_url=wcd_url,
     auth_credentials=Auth.api_key(wcd_api_key),
 )
 
+client = get_weaviate_client()
 # Targeting the collection from your console screenshot
 collection = client.collections.get("CourseBotMemory")
 
@@ -256,5 +259,30 @@ with tab_manage:
                           wvc.query.Filter.by_property("course_name").equal(selected_course)
                 )
                 st.rerun()
+    # --- DANGER ZONE: DELETE ENTIRE COURSE ---
+        st.write("---")
+        with st.expander("⚠️ Danger Zone: Delete Entire Course Bot"):
+            st.warning(f"This will permanently delete **{selected_course}** and all its associated documents. This action cannot be undone.")
+            
+            # Use a confirmation text input to prevent accidental clicks
+            confirm_delete = st.text_input(
+                f"To confirm, type the course name exactly: {selected_course}", 
+                key=f"confirm_{selected_course}"
+            )
+            
+            if st.button(f"🔥 Delete {selected_course} Bot", type="primary"):
+                if confirm_delete == selected_course:
+                    with st.spinner(f"Wiping {selected_course} from memory..."):
+                        # Delete all objects matching this course name
+                        collection.data.delete_many(
+                            where=Filter.by_property("course_name").equal(selected_course) &
+                                  Filter.by_property("course_administrator").equal(st.session_state['username'])
+                        )
+                    st.success(f"Course Bot '{selected_course}' has been completely removed.")
+                    st.rerun()
+                else:
+                    st.error("Course name does not match. Deletion aborted.")
+    
+    
     else:
         st.info("You haven't created any course bots yet.")

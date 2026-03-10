@@ -130,7 +130,7 @@ try:
             st.subheader("📄 Interaction Logs")
             st.dataframe(
                 df,
-                use_container_width=True, # Recommended over width='stretch'
+                width='stretch', 
                 hide_index=True,
                 column_config={
                     "Time": st.column_config.TextColumn("Time", width="small"),
@@ -153,6 +153,5 @@ try:
             st.info(f"No student interactions recorded for '{selected}' yet.")
     else:
         st.warning("No courses found under your administrator account. Have you uploaded any PDFs yet?")
-
-except Exception as e:
-    st.error(f"course-bot Database Error: {e}")
+finally:
+    client.close()
