@@ -3,7 +3,10 @@ import weaviate
 import time
 import weaviate.classes as wvc
 from weaviate.classes.init import Auth, AdditionalConfig, Timeout
-from mistralai import Mistral
+try:
+    from mistralai import Mistral
+except ImportError:
+    from mistralai.client import MistralClient as Mistral
 
 # Initialize session state for messages
 if "messages" not in st.session_state:
