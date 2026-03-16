@@ -6,7 +6,7 @@ python-pptx
 pandas
 wordcloud
 matplotlib
-st-copy-to-clipboard
+st-copy
 bcrypt
 mistralai>=1.0.0
 pyyaml
