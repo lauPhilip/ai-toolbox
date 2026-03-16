@@ -8,5 +8,5 @@ wordcloud
 matplotlib
 st-copy-to-clipboard
 bcrypt
-mistralai
+mistralai>=1.0.0
 pyyaml
