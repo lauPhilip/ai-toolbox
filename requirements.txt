@@ -3,5 +3,10 @@ streamlit-authenticator
 weaviate-client
 pypdf
 python-pptx
-pyyaml
+pandas
+wordcloud
+matplotlib
+st-copy-to-clipboard
 bcrypt
+mistralai
+pyyaml
