@@ -81,14 +81,6 @@ else:
 
 # --- 5. SIDEBAR BRANDING & LOGOUT ---
 with st.sidebar:
-    # Institutional Logo Header
-    logo_col1, logo_col2 = st.columns(2)
-    with logo_col1:
-        st.image("img/AU-LOGO.png", width=None)
-    with logo_col2:
-        st.image("img/IT-VEST-LOGO.png", width=None)
-    
-    st.divider()
     
     if st.session_state.get("authentication_status"):
         st.write(f"Authorized: **{st.session_state['name']}**")

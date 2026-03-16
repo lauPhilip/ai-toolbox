@@ -1,0 +1,7 @@
+streamlit
+streamlit-authenticator
+weaviate-client
+pypdf
+python-pptx
+pyyaml
+bcrypt
