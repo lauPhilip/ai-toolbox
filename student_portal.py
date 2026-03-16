@@ -6,7 +6,15 @@ from weaviate.classes.init import Auth, AdditionalConfig, Timeout
 try:
     from mistralai import Mistral
 except ImportError:
-    from mistralai.client import MistralClient as Mistral
+    # Fallback for specific 2.x sub-module structures
+    try:
+        from mistralai.client import Mistral as Mistral
+    except ImportError as e:
+        st.error(f"⚠️  Error: Mistral SDK is installed but unreachable. {e}")
+        # Debugging: Show us what is actually inside the 'mistralai' package found
+        import mistralai
+        st.write("Package Location:", mistralai.__file__)
+        st.stop()
 
 # Initialize session state for messages
 if "messages" not in st.session_state:
