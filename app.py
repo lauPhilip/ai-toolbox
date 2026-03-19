@@ -86,7 +86,7 @@ with st.sidebar:
         st.write(f"Authorized: **{st.session_state['name']}**")
         
         # Logout logic using the 2026 'stretch' button syntax
-        if st.button("🚪 Log Out", type="secondary", width='stretch'):
+        if st.button("Log Out", type="secondary", width='stretch'):
             authenticator.logout(location='unrendered') 
             st.session_state.update({
                 "authentication_status": None,
