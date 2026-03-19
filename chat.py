@@ -21,7 +21,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # --- MAIN PAGE: STUDENT INTERFACE ---
-st.title("🎓 AU Herning Course-bot | Student Learning Portal")
+st.title("🎓 AU Herning Course-bot")
 
 # 1. Clear Chat UI
 col1, col2 = st.columns([9, 1])

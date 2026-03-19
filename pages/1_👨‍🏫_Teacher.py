@@ -19,7 +19,7 @@ if st.session_state.get("authentication_status") is not True:
 # Ensure the role check is exact
 if str(st.session_state.get("role")).lower() != "teacher":
     st.error(f"Access Denied: Your role is '{st.session_state.get('role')}', but 'teacher' is required.")
-    if st.button("Back to Student Portal"):
+    if st.button("Back to chat"):
         st.switch_page("main.py")
     st.stop()
 # --- WEAVIATE CORE ---

@@ -7,7 +7,7 @@ import bcrypt # Add this at the top of your file
 # --- 1. SESSION INITIALIZATION ---
 # Check if the authenticator exists to prevent double-rendering or crashes
 if "authenticator" not in st.session_state:
-    st.error("L.U.M.A. Connection Error. Please return to the Home page.")
+    st.error("Connection Error. Please return to the Home page.")
     st.stop()
 
 # Using the cached client established in app.py

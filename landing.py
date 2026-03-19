@@ -18,8 +18,8 @@ with col1:
     with st.container(border=True):
         st.subheader("🎓 Students")
         st.write("Access Course Bots and the Prompt Library.")
-        if st.button("Enter Student Portal", width='stretch', type="primary"):
-            st.switch_page("student_portal.py")
+        if st.button("Enter Student Portal (chat)", width='stretch', type="primary"):
+            st.switch_page("chat.py")
 
 with col2:
     with st.container(border=True):

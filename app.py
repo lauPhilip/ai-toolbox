@@ -51,7 +51,7 @@ authenticator = st.session_state["authenticator"]
 
 # --- 3. PAGE DEFINITIONS ---
 landing_page = st.Page("landing.py", title="Home", icon="🏠", default=True)
-student_portal = st.Page("student_portal.py", title="Student Portal", icon="🎓")
+student_portal = st.Page("chat.py", title="Chat", icon="🎓")
 student_prompt_lib = st.Page("pages/4_📋_Student_Prompt_Library.py", title="Prompt Library", icon="📋")
 auth_page = st.Page("pages/auth.py", title="Staff Access", icon="🔑")
 
@@ -67,16 +67,16 @@ if auth_status:
     role = str(st.session_state.get("role")).lower()
     if role == "teacher":
         pg = st.navigation({
-            "🎓 Student Portal": [landing_page, student_portal, student_prompt_lib],
-            "🛠️ Staff Management": [teacher_dashboard, analytics_page, prompt_library]
+            "Student Portal": [landing_page, student_portal, student_prompt_lib],
+            "Staff Management": [teacher_dashboard, analytics_page, prompt_library]
         })
     else:
-        pg = st.navigation({"🎓 Student Portal": [landing_page, student_portal, student_prompt_lib]})
+        pg = st.navigation({"Student": [landing_page, student_portal, student_prompt_lib]})
 else:
     # Categorized navigation for a clean BTECH student experience
     pg = st.navigation({
-        "🎓 Student Portal": [landing_page, student_portal, student_prompt_lib],
-        "🔑 Teachers": [auth_page]
+        " Student": [landing_page, student_portal, student_prompt_lib],
+        " Teachers": [auth_page]
     })
 
 # --- 5. SIDEBAR BRANDING & LOGOUT ---
