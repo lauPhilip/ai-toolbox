@@ -2,39 +2,34 @@ import streamlit as st
 import streamlit_authenticator as stauth
 from weaviate.classes.query import Filter
 import time
-import bcrypt # Add this at the top of your file
+import bcrypt  # Direct engine for salt verification
 
 # --- 1. SESSION INITIALIZATION ---
-# Check if the authenticator exists to prevent double-rendering or crashes
 if "authenticator" not in st.session_state:
     st.error("Connection Error. Please return to the Home page.")
     st.stop()
 
-# Using the cached client established in app.py
+# Accessing the Weaviate Client from session state
 client = st.session_state.get("weaviate_client")
 if not client:
     from app import get_weaviate_client
     client = get_weaviate_client()
 
-authenticator = st.session_state["authenticator"]
 user_registry = client.collections.get("UserRegistry")
 
 # --- 2. UI HEADER ---
-# We use a container to keep everything grouped and prevent duplication
 auth_container = st.container()
 
 with auth_container:
     st.title("👨‍🏫 Staff Access Control")
     st.divider()
 
-    # The Radio button is the primary toggle
     choice = st.radio("Select Action", ["Login", "Register"], horizontal=True, key="auth_choice")
 
     if choice == "Login":
         st.subheader("🔑 Staff Login")
         
         with st.container(border=True):
-            # Unique keys prevent Streamlit from confusing these with other inputs
             login_user = st.text_input("Username", key="login_username_input")
             login_pass = st.text_input("Password", type="password", key="login_password_input")
             
@@ -49,18 +44,15 @@ with auth_container:
                     
                     if response.objects:
                         user_obj = response.objects[0].properties
-                        # 1. Force the hash to be a clean, leading-space-free string
-                        raw_hash = user_obj.get("password_hash")
-                        stored_hash = str(raw_hash).strip() if raw_hash else None
+                        stored_hash = user_obj.get("password_hash")
 
-                        if not stored_hash or not stored_hash.startswith('$'):
-                            st.error(f"⚠️ Registry Error: User '{login_user}' has an incomplete signature.")
+                        if not stored_hash or not str(stored_hash).startswith('$'):
+                            st.error(f"⚠️ Registry Error: User '{login_user}' has an unreadable signature.")
                         else:
                             try:
-                                # 2. THE SECRET SAUCE:
-                                # Some versions of bcrypt/stauth require the hash to be exactly as stored
-                                # We pass the clean string directly.
-                                if stauth.Hasher.check_pw(stored_hash, login_pass):
+                                # DIRECT BCRYPT VERIFICATION (The Fix)
+                                # We encode both to bytes to ensure the salt is read correctly
+                                if bcrypt.checkpw(login_pass.encode('utf-8'), stored_hash.encode('utf-8')):
                                     st.session_state.update({
                                         "authentication_status": True,
                                         "username": login_user,
@@ -72,10 +64,9 @@ with auth_container:
                                     st.switch_page("landing.py")
                                 else:
                                     st.error("Incorrect password.")
-                            except ValueError as e:
-                                # This is where the 'Invalid Salt' lives
+                            except Exception as e:
                                 st.error(f"🔒 Encryption Error: {e}")
-                                st.info("Technical Note: This usually means the hash format is correct but the library version has a conflict.")
+                                st.info("This usually occurs if the stored hash is malformed. Try re-registering the user.")
                     else:
                         st.error("User not found.")
 
@@ -104,19 +95,17 @@ with auth_container:
                     if existing.objects:
                         st.error(f"Username '{reg_username}' is already taken.")
                     else:
-                        with st.spinner("Encrypting..."):
-                            # Generate the hash object
-                            hashed_pw = stauth.Hasher.hash(reg_password)
-                            
-                            # Ensure it's a clean string, not a byte object or a wrapped string
-                            final_hash = str(hashed_pw).strip()
-                            
+                        with st.spinner("Securing Signature..."):
+                            # Fix: stauth.Hasher.hash returns a LIST. We take the first element [0].
+                            final_hash = stauth.Hasher.hash(reg_password)
+    
                             user_registry.data.insert({
                                 "username": reg_username,
-                                "password_hash": final_hash, # Save the clean string
+                                "password_hash": final_hash,
                                 "name": reg_name,
                                 "email": reg_email,
                                 "role": "teacher"
                             })
+                        
                         st.success(f"Registered {reg_name}. You can now log in.")
                         st.balloons()
