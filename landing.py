@@ -1,11 +1,5 @@
 import streamlit as st
 
-# Setup the branding at the top
-img1, img2 = st.columns(2)
-with img1: 
-    st.image("img/AU-LOGO.png", width=300)
-with img2:
-    st.image("img/IT-VEST-LOGO.png", width=300)
 st.title("🚀 AU BTECH Course-bot Gateway")
 st.markdown("##### Funded by **IT-vest - samarbejdende universiteter**")
 st.divider()

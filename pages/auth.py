@@ -24,7 +24,7 @@ with auth_container:
     st.title("👨‍🏫 Staff Access Control")
     st.divider()
 
-    choice = st.radio("Select Action", ["Login", "Register"], horizontal=True, key="auth_choice")
+    choice = st.radio("Select Action", ["Login", "Register"], horizontal=True, key="auth_choice_v2")
 
     if choice == "Login":
         st.subheader("🔑 Staff Login")
