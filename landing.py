@@ -23,16 +23,21 @@ with col2:
         if st.session_state.get("authentication_status"):
             st.write(f"Welcome back, **{st.session_state['name']}**. Select a tool:")
             
-            # Action Cards for Staff
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if st.button("👨‍🏫 Dashboard", width='stretch'):
+            # Updated to 2x2 grid for better visual balance
+            row1_col1, row1_col2 = st.columns(2)
+            row2_col1, row2_col2 = st.columns(2)
+            
+            with row1_col1:
+                if st.button("👨‍🏫 Dashboard", use_container_width=True):
                     st.switch_page("pages/1_👨‍🏫_Teacher.py")
-            with c2:
-                if st.button("📊 Analytics", width='stretch'):
+            with row1_col2:
+                if st.button("📝 Assignment & Grade", use_container_width=True, type="primary"):
+                    st.switch_page("pages/5_📝_Assignment_Architect.py")
+            with row2_col1:
+                if st.button("📊 Analytics", use_container_width=True):
                     st.switch_page("pages/2_📊_Analytics.py")
-            with c3:
-                if st.button("📚 SPLibrary", width='stretch'):
+            with row2_col2:
+                if st.button("📚 SPLibrary", use_container_width=True):
                     st.switch_page("pages/3_📚_System_Prompt_Library.py")
         else:
             # Show the login button for unauthorized users

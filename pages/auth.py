@@ -20,11 +20,16 @@ user_registry = client.collections.get("UserRegistry")
 # --- 2. UI HEADER ---
 auth_container = st.container()
 
+import uuid
+
+if "auth_key" not in st.session_state:
+    st.session_state["auth_key"] = str(uuid.uuid4())
+
 with auth_container:
     st.title("👨‍🏫 Staff Access Control")
     st.divider()
 
-    choice = st.radio("Select Action", ["Login", "Register"], horizontal=True, key="auth_choice_v2")
+    choice = st.radio("Select Action", ["Login", "Register"], horizontal=True, key=f"auth_choice_{st.session_state['auth_key']}")
 
     if choice == "Login":
         st.subheader("🔑 Staff Login")
