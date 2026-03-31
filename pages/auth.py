@@ -61,6 +61,7 @@ with auth_container:
                                     st.session_state.update({
                                         "authentication_status": True,
                                         "username": login_user,
+                                        "email": user_obj["email"],
                                         "name": user_obj["name"],
                                         "role": user_obj["role"]
                                     })

@@ -60,6 +60,7 @@ teacher_dashboard = st.Page("pages/1_👨‍🏫_Teacher.py", title="Teacher Das
 analytics_page = st.Page("pages/2_📊_Analytics.py", title="Analytics", icon="📊")
 prompt_library = st.Page("pages/3_📚_System_Prompt_Library.py", title="System Prompt Library", icon="📚")
 assignment_page = st.Page("pages/5_📝_Assignment_Architect.py", title="Assignment & Grade", icon="📝")
+course_registrar = st.Page("pages/6_🏫_Course_Registrar.py", title="Course Registrar", icon="🏫")
 
 # --- 4. DYNAMIC NAVIGATION ---
 auth_status = st.session_state.get("authentication_status")
@@ -69,7 +70,7 @@ if auth_status:
     if role == "teacher":
         pg = st.navigation({
             "Student Portal": [landing_page, student_portal, student_prompt_lib],
-            "Staff Management": [teacher_dashboard, analytics_page, prompt_library, assignment_page]
+            "Staff Management": [teacher_dashboard, analytics_page, prompt_library, assignment_page, course_registrar]
         })
     else:
         pg = st.navigation({"Student": [landing_page, student_portal, student_prompt_lib]})

@@ -3,38 +3,27 @@ import weaviate
 import time
 import weaviate.classes as wvc
 from weaviate.classes.init import Auth, AdditionalConfig, Timeout
-try:
-    from mistralai import Mistral
-except ImportError:
-    # Fallback for specific 2.x sub-module structures
-    try:
-        from mistralai.client import Mistral as Mistral
-    except ImportError as e:
-        st.error(f"⚠️  Error: Mistral SDK is installed but unreachable. {e}")
-        # Debugging: Show us what is actually inside the 'mistralai' package found
-        import mistralai
-        st.write("Package Location:", mistralai.__file__)
-        st.stop()
+from weaviate.classes.query import Filter
+from datetime import datetime, timezone
+from mistralai.client import Mistral
 
-# Initialize session state for messages
+# --- INITIALIZATION ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "active_bot" not in st.session_state:
+    st.session_state.active_bot = None
 
-# --- MAIN PAGE: STUDENT INTERFACE ---
-st.title("🎓 AU Herning Course-bot")
+# --- MAIN UI ---
+st.title("🎓 Chat")
 
-# 1. Clear Chat UI
-col1, col2 = st.columns([9, 1])
+# Clear Chat logic
+col1, col2 = st.columns([8, 2])
 with col2:
-    if st.button("🗑️ Clear Chat", width='stretch'):
+    if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-st.write("Select your course to begin chatting with the course-specific knowledge base.")
-
-# --- CLIENTS & LOGIC ---
-mistral_client = Mistral(api_key=st.secrets["MISTRAL_KEY"])
-
+# --- CLIENTS ---
 @st.cache_resource 
 def get_weaviate_client():
     return weaviate.connect_to_weaviate_cloud(
@@ -45,42 +34,57 @@ def get_weaviate_client():
     )
 
 client = get_weaviate_client()
+mistral_client = Mistral(api_key=st.secrets["MISTRAL_KEY"])
 collection = client.collections.get("CourseBotMemory")
 
-#   For saving the input
-from datetime import datetime, timezone
-
-def log_interaction(course, query, response):
+# --- UTILITY: LOGGING ---
+def log_interaction(course, bot, query, response):
     try:
         log_collection = client.collections.get("InteractionLogs")
-        
-        # Convert current time to RFC3339 string (e.g., '2026-03-05T15:21:55Z')
-        current_time_rfc3339 = datetime.now(timezone.utc).isoformat()
-        
         log_collection.data.insert({
             "course_name": course,
+            "bot_name": bot,
             "user_query": query,
             "ai_response": response,
-            "timestamp": current_time_rfc3339  # This now matches Weaviate's requirements
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
-    except Exception as e:
-        st.error(f"Logging Error: {e}")
+    except:
+        pass # Silent fail for logging to keep UX smooth
 
-# Fetch available courses
-all_objects = collection.query.fetch_objects(return_properties=["course_name"], limit=1000)
-available_courses = sorted(list(set([obj.properties['course_name'] for obj in all_objects.objects])))
+# --- STEP 1: HIERARCHICAL SELECTION ---
+# Fetch all unique courses
+course_objs = collection.query.fetch_objects(return_properties=["course_name"], limit=1000)
+available_courses = sorted(list(set([obj.properties['course_name'] for obj in course_objs.objects])))
 
 if available_courses:
-    selected_course = st.selectbox("Choose a Course Bot:", available_courses)
+    c_col, b_col = st.columns(2)
+    with c_col:
+        selected_course = st.selectbox("🎯 Select Course:", available_courses)
+    
+    # Fetch unique bots for the selected course
+    bot_objs = collection.query.fetch_objects(
+        filters=Filter.by_property("course_name").equal(selected_course),
+        return_properties=["bot_name"],
+        limit=1000
+    )
+    available_bots = sorted(list(set([obj.properties.get('bot_name', 'Standard Bot') for obj in bot_objs.objects])))
+    
+    with b_col:
+        selected_bot = st.selectbox("🤖 Select Course-bot:", available_bots)
+    
+    # Reset chat if bot changes
+    if st.session_state.active_bot != f"{selected_course}_{selected_bot}":
+        st.session_state.messages = []
+        st.session_state.active_bot = f"{selected_course}_{selected_bot}"
+
     st.divider()
 
-    # Display existing chat history
+    # --- CHAT INTERFACE ---
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat Input
-    user_query = st.chat_input(f"Ask a question about {selected_course}...")
+    user_query = st.chat_input(f"Chatting with {selected_bot}...")
     
     if user_query:
         st.session_state.messages.append({"role": "user", "content": user_query})
@@ -88,57 +92,66 @@ if available_courses:
             st.markdown(user_query)
 
         with st.chat_message("assistant"):
-            with st.spinner("Searching course materials..."):
+            with st.spinner(f"{selected_bot} is scanning documents..."):
+                # Hybrid Search filtered by Course AND specific Bot
                 search_results = collection.query.hybrid(
                     query=user_query,
-                    filters=wvc.query.Filter.by_property("course_name").equal(selected_course),
+                    filters=Filter.by_property("course_name").equal(selected_course) & 
+                            Filter.by_property("bot_name").equal(selected_bot),
                     return_properties=["chunk", "doc_title", "system_prompt", "temperature"],
-                    limit=3
+                    limit=4
                 )
 
             if search_results.objects:
-                context_text = ""
-                references = []
-
-                first_obj = search_results.objects[0]
-                dynamic_sys_prompt = first_obj.properties.get('system_prompt') or "You are a professional academic assistant."
-                dynamic_temp = first_obj.properties.get('temperature')
-                # Ensure temperature is a float and within 0.0-1.0; default to 0.2 if missing
-                final_temp = float(dynamic_temp) if dynamic_temp is not None else 0.2
-
-                for i, obj in enumerate(search_results.objects, 1):
-                    chunk_content = obj.properties.get('chunk', 'No content found.')
-                    doc_title = obj.properties.get('doc_title', 'Unknown Source')
-                    context_text += f"---\nSource {i}:\n{chunk_content}\n"
-                    references.append(f"[{i}] - {doc_title}")
-
-                with st.spinner("Mistral is analyzing and writing..."):
-                    try:
-                        chat_response = mistral_client.chat.complete(
-                            model="mistral-medium-latest",
-                            messages=[
-                                {"role": "system", "content": dynamic_sys_prompt},
-                                {"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"},
-                            ]
-                        )
-                        full_answer = chat_response.choices[0].message.content
-                    except Exception as e:
-                        st.error(f"Mistral API Error: {e}")
-                        st.stop()
-
-                placeholder = st.empty()
-                streamed_text = ""
-                for word in full_answer.split(" "):
-                    streamed_text += word + " "
-                    placeholder.markdown(streamed_text + "▌")
-                    time.sleep(0.04)
+                context_text = "\n".join([f"Source: {o.properties['doc_title']}\n{o.properties['chunk']}" for o in search_results.objects])
                 
-                ref_footer = "\n\n**References used:**\n" + "\n".join(references)
-                final_content = streamed_text.strip() + ref_footer
-                placeholder.markdown(final_content)
-                st.session_state.messages.append({"role": "assistant", "content": final_content})
-                log_interaction(selected_course, user_query, final_content)
+                # --- PROMPT GUARDRAILS ---
+                # We blend the teacher's prompt with strict primary directives
+                teacher_prompt = search_results.objects[0].properties.get('system_prompt') or "You are a helpful assistant."
+                
+                guardrail_prompt = f"""
+                PRIMARY DIRECTIVE: {teacher_prompt}
+                
+                STRICT CONSTRAINTS:
+                1. Use ONLY the provided context to answer. 
+                2. If the answer is not in the context, state that you do not know based on the course materials.
+                3. Do not mention the context or 'Sources' directly in your prose unless asked.
+                4. Maintain a professional, academic tone suitable for Aarhus University students.
+                5. If the user asks for anything unethical or outside the scope of {selected_course}, politely decline.
+                """
+
+                try:
+                    response = mistral_client.chat.complete(
+                        model="mistral-medium-latest",
+                        temperature=float(search_results.objects[0].properties.get('temperature', 0.2)),
+                        messages=[
+                            {"role": "system", "content": guardrail_prompt},
+                            {"role": "user", "content": f"CONTEXT FROM COURSE DATABASE:\n{context_text}\n\nSTUDENT QUESTION: {user_query}"}
+                        ]
+                    )
+                    full_answer = response.choices[0].message.content
+                    
+                    # Streaming effect
+                    placeholder = st.empty()
+                    streamed_text = ""
+                    for word in full_answer.split(" "):
+                        streamed_text += word + " "
+                        placeholder.markdown(streamed_text + "▌")
+                        time.sleep(0.02)
+                    
+                    # References footer
+                    refs = sorted(list(set([obj.properties['doc_title'] for obj in search_results.objects])))
+                    footer = "\n\n**📚 Sources:** " + ", ".join([f"`{r}`" for r in refs])
+                    final_content = streamed_text.strip() + footer
+                    
+                    placeholder.markdown(final_content)
+                    st.session_state.messages.append({"role": "assistant", "content": final_content})
+                    log_interaction(selected_course, selected_bot, user_query, full_answer)
+
+                except Exception as e:
+                    st.error(f"Intelligence Failure: {e}")
             else:
-                st.warning(f"No relevant information found for '{selected_course}'.")
+                st.warning("I couldn't find any relevant data in the course files for that specific query.")
+
 else:
-    st.info("No course materials have been uploaded yet.")
+    st.info("The AU Registry is currently empty. Please wait for staff to upload course bots.")

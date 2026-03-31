@@ -6,283 +6,202 @@ from weaviate.classes.query import Filter
 from pypdf import PdfReader
 from pptx import Presentation
 import uuid
+import time
 
-import streamlit as st
-
-# Debugging: Uncomment the line below if you still get denied to see what the app "sees"
-#st.write(f"Debug: Status={st.session_state.get('authentication_status')}, Role={st.session_state.get('role')}")
-
+# --- AUTH & ROLE GUARD ---
 if st.session_state.get("authentication_status") is not True:
     st.switch_page("main.py")
     st.stop()
 
-# Ensure the role check is exact
 if str(st.session_state.get("role")).lower() != "teacher":
-    st.error(f"Access Denied: Your role is '{st.session_state.get('role')}', but 'teacher' is required.")
-    if st.button("Back to chat"):
-        st.switch_page("main.py")
+    st.error("Access Denied: Teacher role required.")
     st.stop()
+
 # --- WEAVIATE CORE ---
-# Pulling credentials from .streamlit/secrets.toml
 wcd_url = st.secrets["WEAVIATE_URL"]
 wcd_api_key = st.secrets["WEAVIATE_API_KEY"]
 
 @st.cache_resource
 def get_weaviate_client():
     return weaviate.connect_to_weaviate_cloud(
-    cluster_url=wcd_url,
-    auth_credentials=Auth.api_key(wcd_api_key),
-)
+        cluster_url=wcd_url,
+        auth_credentials=Auth.api_key(wcd_api_key),
+    )
 
 client = get_weaviate_client()
-# Targeting the collection from your console screenshot
 collection = client.collections.get("CourseBotMemory")
+course_registry = client.collections.get("CourseRegistry")
 
-st.title(f"👨‍🏫 {st.session_state['name']}'s Course Dashboard")
+# --- INITIALIZE RESET KEYS ---
+if "deploy_key" not in st.session_state:
+    st.session_state.deploy_key = 0
+
+def reset_deploy_form():
+    st.session_state.deploy_key += 1
+    st.rerun()
 
 # --- UTILITY: FILE EXTRACTION ---
 def extract_text(file):
-    if file.name.endswith(".pdf"):
-        reader = PdfReader(file)
-        return " ".join([page.extract_text() for page in reader.pages])
-    elif file.name.endswith(".pptx"):
-        prs = Presentation(file)
-        return " ".join([shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text")])
+    try:
+        if file.name.endswith(".pdf"):
+            reader = PdfReader(file)
+            return " ".join([page.extract_text() for page in reader.pages])
+        elif file.name.endswith(".pptx"):
+            prs = Presentation(file)
+            return " ".join([shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text")])
+    except Exception as e:
+        st.error(f"Failed to read {file.name}: {e}")
     return ""
 
-# --- DASHBOARD TABS ---
-tab_manage, tab_upload = st.tabs(["📚 My Course Bots", "➕ Create Course Bot"])
+st.title(f"👨‍🏫 {st.session_state['name']}'s course-bot Dashboard")
+tab_manage, tab_upload = st.tabs(["📚 Managed CourseBots", "🤖 Deploy New Bot"])
 
+# --- TAB 1: DEPLOY NEW BOT ---
 with tab_upload:
-    st.subheader("Upload to Weaviate")
-    course_name = st.text_input("Course Name (e.g., Advanced Web Development 48020PU018)")
-    program_level = st.selectbox("Level", ["Bachelor", "Master"])
-
-    st.write("---")
-    st.markdown("### 🤖 Bot Configuration")
-    system_prompt = st.text_area(
-        "System Prompt", 
-        value="You are a professional academic assistant. Use ONLY the provided context to answer.",
-        help="This defines how the AI behaves and its limitations."
-    )
-    temperature = st.slider("Creativity (Temperature)", 0.0, 1.0, 0.2, 0.1)
-    st.write("---")
-
-    uploaded_files = st.file_uploader("Upload PDFs or PowerPoints", accept_multiple_files=True)
+    st.subheader("Deploy a Specialized CourseBot")
     
-    if st.button("Vectorize & Save"):
-        if course_name and uploaded_files:
-            with st.spinner("course-bot is processing..."):
-                for file in uploaded_files:
-                    raw_text = extract_text(file)
-                    # Simple chunking (1000 chars)
-                    chunks = [raw_text[i:i+1000] for i in range(0, len(raw_text), 1000)]
-                    
-                    for i, chunk in enumerate(chunks):
-                        collection.data.insert(
-                            properties={
-                                "doc_title": file.name,
-                                "chunk_id": str(uuid.uuid4()),
-                                "chunk": chunk,
-                                "course_name": course_name,
-                                "course_administrator": st.session_state['username'],
-                                "program": program_level,
-                                "system_prompt": system_prompt,
-                                "temperature": float(temperature)
-                            }
-                        )
-            st.success(f"Successfully added {len(uploaded_files)} files to {course_name}!")
-        else:
-            st.warning("Course Name and Files are required.")
+    user_email = st.session_state.get("email")
+    registry_resp = course_registry.query.fetch_objects(
+        filters=Filter.by_property("responsible_email").equal(user_email) | 
+                Filter.by_property("teacher_emails").contains_any([user_email]),
+        return_properties=["course_name", "course_id"],
+        limit=100
+    )
+    
+    course_options = {f"{obj.properties['course_name']} ({obj.properties['course_id']})": obj.properties['course_id'] 
+                      for obj in registry_resp.objects}
 
+    if not course_options:
+        st.warning("⚠️ No courses found in the Registrar.")
+    else:
+        # Form-style container with unique keys derived from deploy_key for easy resetting
+        with st.container(border=True):
+            sel_course_label = st.selectbox("Assign to Course", options=list(course_options.keys()), key=f"course_sel_{st.session_state.deploy_key}")
+            sel_course_id = course_options[sel_course_label]
+            
+            b_name = st.text_input("CourseBot Name", placeholder="e.g., Exam Prep", key=f"bot_name_{st.session_state.deploy_key}")
+            p_level = st.selectbox("Level", ["Bachelor", "Master"], key=f"lvl_{st.session_state.deploy_key}")
+
+            st.write("---")
+            sys_p = st.text_area("System Prompt", value="You are a professional academic assistant...", height=200, key=f"prompt_{st.session_state.deploy_key}")
+            temp = st.slider("Temperature (Creativity)", 0.0, 1.0, 0.2, 0.1, key=f"temp_{st.session_state.deploy_key}")
+
+            up_files = st.file_uploader("Upload Knowledge Base", accept_multiple_files=True, key=f"uploader_{st.session_state.deploy_key}")
+            
+            if st.button("🚀 Deploy CourseBot", type="primary", use_container_width=True):
+                if b_name and up_files:
+                    with st.spinner(f"Deploying {b_name}..."):
+                        for file in up_files:
+                            text = extract_text(file)
+                            chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
+                            for chunk in chunks:
+                                collection.data.insert(properties={
+                                    "doc_title": file.name, "chunk": chunk, "bot_name": b_name,
+                                    "course_id": sel_course_id, "course_name": sel_course_label,
+                                    "course_administrator": user_email, "program": p_level,
+                                    "system_prompt": sys_p, "temperature": float(temp)
+                                })
+                    st.success(f"'{b_name}' deployed!")
+                    time.sleep(1)
+                    reset_deploy_form()
+                else:
+                    st.warning("Bot Name and Files are required.")
+
+# --- TAB 2: MANAGE & EDIT ---
 with tab_manage:
-    st.subheader("Your Active Courses")
-
-    # 1. Fetch unique courses managed by this specific teacher
+    st.subheader("Manage Active CourseBots")
+    
+    user_email = st.session_state.get("email")
     results = collection.query.fetch_objects(
-        filters=Filter.by_property("course_administrator").equal(st.session_state['username']),
-        return_properties=["course_name"],
-        limit=1000 
+        filters=Filter.by_property("course_administrator").equal(user_email),
+        return_properties=["bot_name", "course_name"], limit=1000 
     )
 
-    my_courses = sorted(list(set([obj.properties['course_name'] for obj in results.objects])))
+    organized = {}
+    for obj in results.objects:
+        c_name = obj.properties['course_name']
+        b_name = obj.properties.get('bot_name') or "Standard Bot"
+        if c_name not in organized: organized[c_name] = []
+        if b_name not in organized[c_name]: organized[c_name].append(b_name)
     
-    if my_courses:
-        selected_course = st.selectbox("Select Course to Manage", my_courses)
+    if organized:
+        sel_c = st.selectbox("Filter by Course", options=list(organized.keys()), key="m_c_sel")
+        sel_b = st.selectbox("Select CourseBot", options=organized[sel_c], key="m_b_sel")
         
-        # --- EDIT BOT CONFIGURATION SECTION ---
         st.write("---")
-        st.markdown(f"### ⚙️ Bot Configuration for: {selected_course}")
+        st.markdown(f"### ⚙️ Configuration: **{sel_b}**")
         
-        # Fetch current config from one chunk of this course to pre-fill the fields
-        config_sample = collection.query.fetch_objects(
-            filters=Filter.by_property("course_name").equal(selected_course),
-            return_properties=["system_prompt", "temperature"],
-            limit=1
+        # 1. SETTINGS MANAGEMENT
+        config = collection.query.fetch_objects(
+            filters=Filter.by_property("course_name").equal(sel_c) & Filter.by_property("bot_name").equal(sel_b),
+            return_properties=["system_prompt", "temperature"], limit=1
         )
         
-        # Set defaults in case it's an older course with empty fields
-        current_p = "You are a professional academic assistant. Use ONLY the provided context to answer."
-        current_t = 0.2
-        current_lvl = "Bachelor"
-        
-        if config_sample.objects:
-            obj = config_sample.objects[0]
-            # Use existing values if they aren't None
-            current_p = obj.properties.get("system_prompt") or current_p
-            current_lvl = obj.properties.get("program") or current_lvl
-            current_t = obj.properties.get("temperature") if obj.properties.get("temperature") is not None else current_t
-
-        # --- SYSTEM PROMPT LIBRARY INTEGRATION ---
-        # Check if there is a prompt waiting to be imported from the library
-        if 'active_prompt_copy' in st.session_state:
-            st.info("💡 You have a prompt template waiting in your clipboard from the Library.")
+        if config.objects:
+            obj = config.objects[0]
+            edit_p = st.text_area("System Prompt", value=obj.properties.get("system_prompt"), height=200, key="m_p_area")
+            edit_t = st.slider("Temperature", 0.0, 1.0, float(obj.properties.get("temperature", 0.2)), 0.1, key="m_t_slider")
             
-            p_col1, p_col2 = st.columns([0.7, 0.3])
-            with p_col1:
-                # Show a snippet of what's waiting
-                st.write("**Template waiting:** " + st.session_state['active_prompt_copy'][:50] + "...")
-            with p_col2:
-                if st.button("📋 Use Template"):
-                    # This is the crucial part: update the variable directly
-                    current_p = st.session_state['active_prompt_copy']
-                    
-                    # Clear the clipboard
-                    del st.session_state['active_prompt_copy']
-                    
-                    # Use a temporary state variable to force the text_area to update
-                    st.session_state["pasted_prompt"] = current_p
+            if st.button("💾 Save Changes", type="primary", key="m_save_btn"):
+                targets = collection.query.fetch_objects(
+                    filters=Filter.by_property("course_name").equal(sel_c) & Filter.by_property("bot_name").equal(sel_b),
+                    return_properties=[], limit=10000
+                )
+                for target in targets.objects:
+                    collection.data.update(uuid=target.uuid, properties={"system_prompt": edit_p, "temperature": edit_t})
+                st.success("Tuning complete.")
+                st.rerun()
+
+        # 2. FILE MANAGEMENT (Edit/Delete existing files)
+        st.write("---")
+        st.markdown(f"### 📄 Knowledge Assets for **{sel_b}**")
+        
+        file_results = collection.query.fetch_objects(
+            filters=Filter.by_property("course_name").equal(sel_c) & Filter.by_property("bot_name").equal(sel_b),
+            return_properties=["doc_title"], limit=1000
+        )
+        unique_files = sorted(list(set([o.properties['doc_title'] for o in file_results.objects])))
+
+        if not unique_files:
+            st.info("No files currently assigned to this bot.")
+        else:
+            for f_name in unique_files:
+                col_txt, col_del = st.columns([0.85, 0.15])
+                col_txt.markdown(f"📄 `{f_name}`")
+                if col_del.button("🗑️", key=f"del_file_{f_name}_{sel_b}"):
+                    collection.data.delete_many(
+                        where=Filter.by_property("doc_title").equal(f_name) & 
+                              Filter.by_property("bot_name").equal(sel_b) &
+                              Filter.by_property("course_name").equal(sel_c)
+                    )
+                    st.toast(f"Purged {f_name}")
+                    time.sleep(0.5)
                     st.rerun()
 
-        # Determine what the text area should display
-        # We prioritize a freshly pasted prompt over the one fetched from Weaviate
-        if "pasted_prompt" in st.session_state:
-            final_prompt_value = st.session_state["pasted_prompt"]
-        else:
-            final_prompt_value = current_p
+        # 3. ADD NEW CONTENT
+        st.markdown("#### ➕ Add Knowledge")
+        new_up = st.file_uploader("Upload additional files", accept_multiple_files=True, key="m_file_add")
+        if st.button("🚀 Process & Add", key="m_add_btn"):
+            if new_up:
+                with st.spinner("Integrating..."):
+                    for file in new_up:
+                        text = extract_text(file)
+                        chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
+                        # Using existing edit_p and edit_t to stay consistent
+                        for chunk in chunks:
+                            collection.data.insert(properties={
+                                "doc_title": file.name, "chunk": chunk, "bot_name": sel_b,
+                                "course_name": sel_c, "course_administrator": user_email,
+                                "system_prompt": edit_p, "temperature": edit_t
+                            })
+                st.rerun()
 
-        # UI for editing
-        edit_p = st.text_area(
-            "System Prompt", 
-            value=final_prompt_value, 
-            height=250,
-            help="Instructions for how the AI should behave."
-        )
-        
-        edit_t = st.slider("Temperature (Creativity)", 0.0, 1.0, float(current_t), 0.1)
-        
-        if st.button("💾 Save Bot Settings"):
-            with st.spinner("Updating bot personality..."):
-                # 1. Fetch all object IDs for this course
-                targets = collection.query.fetch_objects(
-                    filters=Filter.by_property("course_name").equal(selected_course),
-                    return_properties=[], 
-                    limit=10000 
-                )
-                
-                # 2. Update each object individually
-                for obj in targets.objects:
-                    collection.data.update(
-                        uuid=obj.uuid,
-                        properties={
-                            "system_prompt": edit_p, # This will now correctly take the text_area content
-                            "temperature": edit_t
-                        }
-                    )
-            
-            # --- CLEANUP AFTER SUCCESSFUL SAVE ---
-            if "pasted_prompt" in st.session_state:
-                del st.session_state["pasted_prompt"]
-            
-            st.success(f"Bot personality updated for all {len(targets.objects)} chunks in {selected_course}!")
-            st.rerun()
-            
-        st.write("---")
-        st.markdown(f"### ➕ Add Content to {selected_course}")
-
-        # 1. Use a dynamic key based on a counter to force a reset
-        if "uploader_key" not in st.session_state:
-            st.session_state.uploader_key = 0
-
-        new_files = st.file_uploader(
-            "Upload more PDFs or PowerPoints", 
-            accept_multiple_files=True, 
-            key=f"manage_upload_{st.session_state.uploader_key}"
-        )
-
-        if st.button("🚀 Upload & Process New Files"):
-            if new_files:
-                with st.spinner("L.U.M.A. is integrating new knowledge..."):
-                    for file in new_files:
-                        raw_text = extract_text(file)
-                        chunks = [raw_text[i:i+1000] for i in range(0, len(raw_text), 1000)]
-                        
-                        for i, chunk in enumerate(chunks):
-                            collection.data.insert(
-                                properties={
-                                    "doc_title": file.name,
-                                    "chunk_id": str(uuid.uuid4()),
-                                    "chunk": chunk,
-                                    "course_name": selected_course,
-                                    "course_administrator": st.session_state['username'],
-                                    "program": current_lvl,
-                                    "system_prompt": edit_p, 
-                                    "temperature": edit_t
-                                }
-                            )
-                
-                # 2. Increment the key to force the uploader to clear
-                st.session_state.uploader_key += 1
-                st.success(f"Added {len(new_files)} files to {selected_course}!")
-                
-                # 3. Rerun now happens with a new widget key
-                st.rerun() 
-            else:
-                st.warning("Please select files first.")
-
-        # --- FILE LIST SECTION ---
-        st.write("---")
-        file_results = collection.query.fetch_objects(
-            filters=Filter.by_property("course_name").equal(selected_course),
-            return_properties=["doc_title"],
-            limit=1000
-        )
-        unique_files = sorted(list(set([obj.properties['doc_title'] for obj in file_results.objects])))
-        
-        st.write(f"Existing Files in **{selected_course}**:")
-        for f in unique_files:
-            col1, col2 = st.columns([0.8, 0.2])
-            col1.text(f"📄 {f}")
-            if col2.button("🗑️", key=f"del_{f}"):
+        # 4. DANGER ZONE
+        with st.expander("⚠️ Danger Zone"):
+            if st.button(f"🔥 Wipe '{sel_b}' Permanently", type="primary", use_container_width=True):
                 collection.data.delete_many(
-                    where=wvc.query.Filter.by_property("doc_title").equal(f) &
-                          wvc.query.Filter.by_property("course_name").equal(selected_course)
+                    where=Filter.by_property("course_name").equal(sel_c) & Filter.by_property("bot_name").equal(sel_b)
                 )
                 st.rerun()
-    # --- DANGER ZONE: DELETE ENTIRE COURSE ---
-        st.write("---")
-        with st.expander("⚠️ Danger Zone: Delete Entire Course Bot"):
-            st.warning(f"This will permanently delete **{selected_course}** and all its associated documents. This action cannot be undone.")
-            
-            # Use a confirmation text input to prevent accidental clicks
-            confirm_delete = st.text_input(
-                f"To confirm, type the course name exactly: {selected_course}", 
-                key=f"confirm_{selected_course}"
-            )
-            
-            if st.button(f"🔥 Delete {selected_course} Bot", type="primary"):
-                if confirm_delete == selected_course:
-                    with st.spinner(f"Wiping {selected_course} from memory..."):
-                        # Delete all objects matching this course name
-                        collection.data.delete_many(
-                            where=Filter.by_property("course_name").equal(selected_course) &
-                                  Filter.by_property("course_administrator").equal(st.session_state['username'])
-                        )
-                    st.success(f"Course Bot '{selected_course}' has been completely removed.")
-                    st.rerun()
-                else:
-                    st.error("Course name does not match. Deletion aborted.")
-    
-    
     else:
-        st.info("You haven't created any course bots yet.")
+        st.info("No active CourseBots found.")
