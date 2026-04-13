@@ -3,9 +3,10 @@ import weaviate.classes.config as wvc
 from mistralai.client import Mistral
 import weaviate.classes.query as wvc_query
 import json
-import re
+import pandas as pd
+import time
 
-# --- 2. INITIALIZATION & STATE MANAGEMENT ---
+# --- 1. INITIALIZATION & STATE MANAGEMENT ---
 if "form_id" not in st.session_state:
     st.session_state["form_id"] = 0
 if "scraped_data" not in st.session_state:
@@ -17,11 +18,9 @@ def reset_registry_form():
     st.session_state["scraped_data"] = None
     st.rerun()
 
-# --- 3. AI EXTRACTION ENGINE (Mistral-Medium) ---
+# --- 2. AI EXTRACTION ENGINE ---
 def parse_with_ai(raw_text):
-    """Passes raw text to Mistral to extract a structured Course JSON."""
     mistral_client = Mistral(api_key=st.secrets["MISTRAL_KEY"])
-    
     system_prompt = """
     You are course-bot. Extract AU course data into JSON.
     Fields: course_id, course_name, ects (int), course_responsible, responsible_email, 
@@ -42,17 +41,19 @@ def parse_with_ai(raw_text):
 
 # --- UI LAYER ---
 st.title("🏫 Course Management")
-st.markdown("##### Synchronize AU Kursuskatalog DNA with the Registry.")
+st.markdown("##### Synchronize AU Kursuskatalog DNA and Manage Student Access.")
 
-tab1, tab2 = st.tabs(["🆕 Register New Course", "🛠️ Edit/Delete Registry"])
+tab1, tab2, tab3 = st.tabs(["🆕 Register New Course", "🛠️ Edit/Delete Registry", "👥 Student Enrollment"])
+
+from app import client 
+user_email = st.session_state.get("email")
 
 # --- TAB 1: REGISTRATION ---
 with tab1:
     with st.container(border=True):
         st.subheader("📡 Intelligence Intake")
-        st.info("💡 **Tip:** Since the AU Catalog has high security, Copy (Ctrl+A) and Paste (Ctrl+V) the course page text below.")
+        st.info("💡 **Tip:** Copy (Ctrl+A) and Paste (Ctrl+V) the course page text from the AU Catalog below.")
         
-        # Dynamic key based on form_id ensures the field clears on reset
         manual_text = st.text_area("Paste Raw Course Content", height=200, 
                                    key=f"input_{st.session_state['form_id']}",
                                    placeholder="Paste the course catalog content here...")
@@ -70,26 +71,20 @@ with tab1:
             if st.button("🗑️ Reset Form", use_container_width=True):
                 reset_registry_form()
 
-    # The Verification Form (Appears only after AI analysis)
     if st.session_state["scraped_data"]:
         st.divider()
         data = st.session_state["scraped_data"]
-        
         with st.form("verify_course_form"):
             st.subheader("🛠️ Verify & Save Course")
             c_left, c_right = st.columns(2)
-            
             with c_left:
                 name = st.text_input("Course Name", value=data.get("course_name"))
                 cid = st.text_input("Course ID", value=data.get("course_id"))
-                # Defaulting to 0 if ECTS is not a number
                 ects_val = data.get("ects", 0)
                 ects = st.number_input("ECTS", value=int(ects_val) if str(ects_val).isdigit() else 0)
-            
             with c_right:
                 resp = st.text_input("Responsible Name", value=data.get("course_responsible"))
                 rem = st.text_input("Responsible Email", value=data.get("responsible_email"))
-                
                 t_list = data.get("associated_teachers", [])
                 e_list = data.get("teacher_emails", [])
                 teachers = st.text_area("Teachers (comma separated)", value=", ".join(t_list) if isinstance(t_list, list) else str(t_list))
@@ -98,9 +93,6 @@ with tab1:
             outcomes = st.text_area("Learning Outcomes", value=data.get("learning_outcomes"), height=200)
             
             if st.form_submit_button("✅ Secure in Registry", type="primary", use_container_width=True):
-                from app import client # Using your cached client from app.py
-                
-                # Ensure the collection exists
                 if not client.collections.exists("CourseRegistry"):
                      client.collections.create(
                         name="CourseRegistry",
@@ -116,7 +108,6 @@ with tab1:
                         ]
                     )
                 
-                # Insert the Course DNA
                 registry = client.collections.get("CourseRegistry")
                 registry.data.insert(properties={
                     "course_id": cid, "course_name": name, "ects": ects,
@@ -127,23 +118,17 @@ with tab1:
                 })
                 st.success(f"Intelligence Secured: {name} is now official.")
                 st.balloons()
+                time.sleep(1)
                 reset_registry_form()
 
 # --- TAB 2: EDIT / DELETE REGISTRY ---
 with tab2:
     st.subheader("📋 Active Course Registry")
-    from app import client
-    
-    # Identity Anchor
-    user_email = st.session_state.get("email")
-    
     if not user_email:
-        st.warning("📡 Identity Signal Lost. Please log in again to manage courses.")
+        st.warning("📡 Identity Signal Lost. Please log in again.")
     else:
         registry = client.collections.get("CourseRegistry")
-        
         try:
-            # Multi-Role Query: Show if I am responsible OR associated
             response = registry.query.fetch_objects(
                 filters=wvc_query.Filter.by_property("responsible_email").equal(user_email) | 
                         wvc_query.Filter.by_property("teacher_emails").contains_any([user_email]),
@@ -156,9 +141,7 @@ with tab2:
                 for obj in response.objects:
                     p = obj.properties
                     is_resp = p.get('responsible_email') == user_email
-                    role_tag = "⭐ Responsible" if is_resp else "👤 Teacher"
-                    
-                    with st.expander(f"{role_tag} | {p['course_name']} ({p['course_id']})"):
+                    with st.expander(f"{'⭐ Responsible' if is_resp else '👤 Teacher'} | {p['course_name']} ({p['course_id']})"):
                         with st.form(key=f"edit_{obj.uuid}"):
                             col_a, col_b = st.columns(2)
                             with col_a:
@@ -168,12 +151,8 @@ with tab2:
                             with col_b:
                                 e_resp = st.text_input("Responsible", value=p.get('course_responsible'))
                                 e_rem = st.text_input("Email", value=p.get('responsible_email'))
-                                
-                                # List conversion for editing
-                                t_str = ", ".join(p.get('associated_teachers', []))
-                                m_str = ", ".join(p.get('teacher_emails', []))
-                                e_teachers = st.text_area("Teachers", value=t_str)
-                                e_emails = st.text_area("Teacher Emails", value=m_str)
+                                e_teachers = st.text_area("Teachers", value=", ".join(p.get('associated_teachers', [])))
+                                e_emails = st.text_area("Teacher Emails", value=", ".join(p.get('teacher_emails', [])))
 
                             e_outcomes = st.text_area("Learning Outcomes", value=p.get('learning_outcomes'), height=150)
 
@@ -191,14 +170,79 @@ with tab2:
                                 st.success("Registry Updated.")
                                 st.rerun()
 
-                        # DELETE GATEKEEPER
-                        if is_resp:
-                            if st.button("🗑️ Delete Course", key=f"del_{obj.uuid}", type="secondary", use_container_width=True):
-                                registry.data.delete_by_id(obj.uuid)
-                                st.warning("Course purged from registry.")
-                                st.rerun()
-                        else:
-                            st.caption("ℹ️ Only the Course Responsible can delete this registry.")
-
+                        if is_resp and st.button("🗑️ Delete Course", key=f"del_{obj.uuid}", use_container_width=True):
+                            registry.data.delete_by_id(obj.uuid)
+                            st.rerun()
         except Exception as e:
-            st.error(f"Vault Communication Failure: {e}")
+            st.error(f"Registry Retrieval Error: {e}")
+
+# --- TAB 3: STUDENT ENROLLMENT ---
+with tab3:
+    st.subheader("👥 Enroll Students in Courses")
+    if not user_email:
+        st.warning("Please log in to manage students.")
+    else:
+        registry = client.collections.get("CourseRegistry")
+        my_courses_resp = registry.query.fetch_objects(
+            filters=wvc_query.Filter.by_property("responsible_email").equal(user_email) | 
+                    wvc_query.Filter.by_property("teacher_emails").contains_any([user_email])
+        )
+        
+        if not my_courses_resp.objects:
+            st.info("No courses found. Register a course first.")
+        else:
+            course_dict = {f"{o.properties['course_name']} ({o.properties['course_id']})": o.properties['course_id'] 
+                           for o in my_courses_resp.objects}
+            target_course_label = st.selectbox("Select Target Course", options=list(course_dict.keys()))
+            target_course_id = course_dict[target_course_label]
+
+            user_registry = client.collections.get("UserRegistry")
+            all_students_resp = user_registry.query.fetch_objects(
+                filters=wvc_query.Filter.by_property("role").equal("student"), limit=500
+            )
+            
+            if not all_students_resp.objects:
+                st.info("No students registered yet.")
+            else:
+                student_data = []
+                for s in all_students_resp.objects:
+                    p = s.properties
+                    curr_ids = p.get("course_ids", "")
+                    is_enrolled = target_course_id in (curr_ids.split(",") if curr_ids else [])
+                    student_data.append({
+                        "Select": is_enrolled, "Name": p.get("name"), "Email": p.get("email"),
+                        "Current Courses": curr_ids, "uuid": str(s.uuid)
+                    })
+
+                df = pd.DataFrame(student_data)
+                edited_df = st.data_editor(
+                    df,
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(help="Toggle Enrollment"),
+                        "uuid": None, "Current Courses": st.column_config.TextColumn(disabled=True)
+                    },
+                    disabled=["Name", "Email", "Current Courses"],
+                    hide_index=True, use_container_width=True
+                )
+
+                if st.button("💾 Sync Enrollment Changes", type="primary"):
+                    for index, row in edited_df.iterrows():
+                        old_ids_str = row["Current Courses"] or ""
+                        old_ids_list = [id.strip() for id in old_ids_str.split(",") if id.strip()]
+                        
+                        changed = False
+                        if row["Select"] and target_course_id not in old_ids_list:
+                            old_ids_list.append(target_course_id)
+                            changed = True
+                        elif not row["Select"] and target_course_id in old_ids_list:
+                            old_ids_list.remove(target_course_id)
+                            changed = True
+
+                        if changed:
+                            user_registry.data.update(
+                                uuid=row["uuid"],
+                                properties={"course_ids": ",".join(old_ids_list)}
+                            )
+                    st.success("Enrollment Synchronized.")
+                    time.sleep(1)
+                    st.rerun()

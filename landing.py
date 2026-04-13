@@ -4,45 +4,52 @@ st.title("🚀 AU BTECH Course-bot Gateway")
 st.markdown("##### Funded by **IT-vest - samarbejdende universiteter**")
 st.divider()
 
-st.write("Welcome to the centralized AI infrastructure for Herning. Please select your access level below:")
+# Identity Check
+is_logged_in = st.session_state.get("authentication_status")
+role_raw = st.session_state.get("role")
+user_role = str(role_raw).lower() if role_raw else ""
 
+# Layout Grid
 col1, col2 = st.columns(2)
 
+# --- COLUMN 1: STUDENT HUB ---
 with col1:
     with st.container(border=True):
-        st.subheader("🎓 Students")
-        st.write("Access Course Bots and the Prompt Library.")
-        if st.button("Enter Student Portal (chat)", width='stretch', type="primary"):
-            st.switch_page("chat.py")
-
-with col2:
-    with st.container(border=True):
-        st.subheader("👨‍🏫 Staff Management")
-        
-        # Check if the user is ALREADY logged in
-        if st.session_state.get("authentication_status"):
-            st.write(f"Welcome back, **{st.session_state['name']}**. Select a tool:")
-            
-            # Updated to 2x2 grid for better visual balance
-            row1_col1, row1_col2 = st.columns(2)
-            row2_col1, row2_col2 = st.columns(2)
-            
-            with row1_col1:
-                if st.button("👨‍🏫 Dashboard", use_container_width=True):
-                    st.switch_page("pages/1_👨‍🏫_Teacher.py")
-            with row1_col2:
-                if st.button("📝 Assignment & Grade", use_container_width=True, type="primary"):
-                    st.switch_page("pages/5_📝_Assignment_Architect.py")
-            with row2_col1:
-                if st.button("📊 Analytics", use_container_width=True):
-                    st.switch_page("pages/2_📊_Analytics.py")
-            with row2_col2:
-                if st.button("📚 SPLibrary", use_container_width=True):
-                    st.switch_page("pages/3_📚_System_Prompt_Library.py")
+        st.subheader("🎓 Student Hub")
+        if is_logged_in:
+            # Both Students and Teachers can enter the portal, but we hide the login/demo
+            st.write(f"Access the course bots as **{user_role.capitalize()}**.")
+            if st.button("🚀 Enter Student Portal (Chat)", use_container_width=True, type="primary"):
+                st.switch_page("chat.py")
         else:
-            # Show the login button for unauthorized users
-            st.write("Manage course materials and engineer prompts.")
-            if st.button("Staff Login", width='stretch'):
-                st.switch_page("pages/auth.py")
+            # Only Guests see these
+            st.write("Access AI Course Bots and Assignment Briefings.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🕵️ Guest Demo", use_container_width=True):
+                    st.switch_page("chat.py")
+            with c2:
+                if st.button("🔐 Login", use_container_width=True, type="primary"):
+                    st.switch_page("pages/login.py")
 
-st.info("💡 **Tip:** If you are a student, no login is required.")
+# --- COLUMN 2: STAFF MANAGEMENT ---
+# We hide this column entirely if a Student is logged in
+if user_role != "student":
+    with col2:
+        with st.container(border=True):
+            st.subheader("👨‍🏫 Staff Management")
+            if is_logged_in and user_role == "teacher":
+                st.write(f"Logged in as Staff: **{st.session_state['name']}**")
+                if st.button("👨‍🏫 Teacher Dashboard", use_container_width=True, type="primary"):
+                    st.switch_page("pages/1_👨‍🏫_Teacher.py")
+            else:
+                # This only shows for Guests
+                st.write("Engineer course materials and evaluate analytics.")
+                if st.button("Staff Login", use_container_width=True):
+                    st.switch_page("pages/login.py")
+
+# Clean Status Bar
+if is_logged_in:
+    st.success(f"✔️ Currently authenticated as **{st.session_state['name']}** ({user_role.capitalize()})")
+else:
+    st.info("💡 **Tip:** Login with your AU account to unlock assigned course materials.")
