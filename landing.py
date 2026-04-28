@@ -29,7 +29,8 @@ with col1:
                 if st.button("🕵️ Guest Demo", use_container_width=True):
                     st.switch_page("chat.py")
             with c2:
-                if st.button("🔐 Login", use_container_width=True, type="primary"):
+               if st.button("🔐 Login", key="landing_login_btn", use_container_width=True, type="primary"):
+                    st.session_state.active_page = "pages/login.py" # Tactical state set
                     st.switch_page("pages/login.py")
 
 # --- COLUMN 2: STAFF MANAGEMENT ---
@@ -46,6 +47,7 @@ if user_role != "student":
                 # This only shows for Guests
                 st.write("Engineer course materials and evaluate analytics.")
                 if st.button("Staff Login", use_container_width=True):
+                    st.session_state.active_page = "pages/login.py" 
                     st.switch_page("pages/login.py")
 
 # Clean Status Bar

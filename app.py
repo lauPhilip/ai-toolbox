@@ -17,6 +17,7 @@ def get_weaviate_client():
         auth_credentials=Auth.api_key(st.secrets["WEAVIATE_API_KEY"]),
     )
 
+# Exported client for use in sub-pages
 client = get_weaviate_client()
 
 def ensure_user_registry_exists():
@@ -31,7 +32,7 @@ def ensure_user_registry_exists():
                 wvc.Property(name="name", data_type=wvc.DataType.TEXT),
                 wvc.Property(name="email", data_type=wvc.DataType.TEXT),
                 wvc.Property(name="role", data_type=wvc.DataType.TEXT),
-                wvc.Property(name="course_ids", data_type=wvc.DataType.TEXT), # Added for student assignments
+                wvc.Property(name="course_ids", data_type=wvc.DataType.TEXT), 
             ]
         )
 
@@ -39,25 +40,22 @@ ensure_user_registry_exists()
 
 # --- 2. AUTHENTICATION HANDSHAKE ---
 if "authenticator" not in st.session_state:
-    # Cookie-based persistence for a professional feel
     authenticator = stauth.Authenticate(
         {'usernames': {}}, 
         st.secrets["COOKIE_NAME"],
         st.secrets["COOKIE_KEY"],
-        30 # 30-day persistence
+        30 
     )
     st.session_state["authenticator"] = authenticator
 
 authenticator = st.session_state["authenticator"]
 
 # --- 3. PAGE DEFINITIONS ---
-# Student/Public Core
 landing_page = st.Page("landing.py", title="Home", icon="🏠", default=True)
 chat_page = st.Page("chat.py", title="Chat", icon="🎓")
 prompt_lib_student = st.Page("pages/4_📋_Student_Prompt_Library.py", title="Prompt Library", icon="📋")
 login_page = st.Page("pages/login.py", title="Login", icon="🔐")
 
-# Staff Management Cluster
 teacher_dashboard = st.Page("pages/1_👨‍🏫_Teacher.py", title="Teacher Dashboard", icon="👨‍🏫")
 analytics_page = st.Page("pages/2_📊_Analytics.py", title="Analytics", icon="📊")
 sys_prompt_library = st.Page("pages/3_📚_System_Prompt_Library.py", title="System Prompt Library", icon="📚")
@@ -78,13 +76,10 @@ if auth_status:
             "Academia": [lit_review_agent],
         })
     else:
-        # Verified Student View
         pg = st.navigation({
             "My Learning": [landing_page, chat_page, prompt_lib_student, student_hub]
         })
 else:
-    # Guest/Logged-out View
-    # Note: chat_page remains here to support the "2-query demo" logic
     pg = st.navigation({
         "Gateway": [landing_page, login_page],
         "Preview": [chat_page, prompt_lib_student]
@@ -92,13 +87,11 @@ else:
 
 # --- 5. SIDEBAR BRANDING & LOGOUT ---
 with st.sidebar:
-    
     if auth_status:
         st.write(f"Authorized: **{st.session_state['name']}**")
         st.caption(f"Role: {st.session_state['role'].upper()}")
         
         if st.button("Log Out", type="secondary", use_container_width=True):
-            # Cleanup session state and reset cookies
             st.session_state.update({
                 "authentication_status": None,
                 "username": None,
