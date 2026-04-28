@@ -58,7 +58,7 @@ def get_weaviate_client():
         cluster_url=st.secrets["WEAVIATE_URL"],
         auth_credentials=Auth.api_key(st.secrets["WEAVIATE_API_KEY"]),
         headers={"X-Mistral-Api-Key": st.secrets["MISTRAL_KEY"]},
-        additional_config=AdditionalConfig(timeout=Timeout(query=60))
+        additional_config=AdditionalConfig(timeout=Timeout(query=90))
     )
 
 client = get_weaviate_client()
@@ -99,7 +99,7 @@ try:
     course_objs = collection.query.fetch_objects(
         filters=fetch_filter,
         return_properties=["course_name"], 
-        limit=1000
+        limit=25
     )
     available_courses = sorted(list(set([obj.properties['course_name'] for obj in course_objs.objects])))
 except Exception as e:
@@ -117,7 +117,7 @@ if available_courses:
     bot_objs = collection.query.fetch_objects(
         filters=Filter.by_property("course_name").equal(selected_course),
         return_properties=["bot_name"],
-        limit=1000
+        limit=25
     )
     available_bots = sorted(list(set([obj.properties.get('bot_name', 'Standard Bot') for obj in bot_objs.objects])))
     
